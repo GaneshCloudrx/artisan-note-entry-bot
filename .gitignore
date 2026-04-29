@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Logs directory
+logs/
+*.log
+
+# Recordings directory
+recordings/
+
+# Credentials (if you create credentials.py)
+credentials.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project specific
+log_*.txt
+last_sent_line.txt
+
+# Secrets / credentials (never commit these — use *.example.py templates instead)
+config.py
+modules/users.py
+credentials.py
+*.token
+*.pem
+.env
+.env.*
+
+# PHI / runtime artifacts (must NEVER be pushed)
+reports/
+screenshots/
+user_data/
+storage_state.json
+
+# Browser extensions / vendored binaries (bloat)
+extensions/
+
+# Python build / packaging
+*.egg-info/
+build/
+dist/
