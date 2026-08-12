@@ -51,7 +51,8 @@ class NoteEntry:
             return False
     
     def add_new_note(self, note_content: str, digital_signature: str, 
-                     screen_shot_path: str, screenshot_name: str) -> bool:
+                     screen_shot_path: str, screenshot_name: str,
+                     check_confidential: bool = False) -> bool:
         """
         Add a new note to the patient's record.
         
@@ -60,6 +61,10 @@ class NoteEntry:
             digital_signature: Digital signature for saving the note
             screen_shot_path: Directory path to save screenshot
             screenshot_name: Name of the screenshot file
+            check_confidential: If True, tick the "Confidential" checkbox on
+                the note-entry form before saving. Required for clinics that
+                mandate confidential notes (e.g. Specialists in Reproductive
+                Medicine & Surgery, P.A.).
             
         Returns:
             True if note added successfully, False otherwise
@@ -134,6 +139,45 @@ class NoteEntry:
             self.page.keyboard.press("Escape")
             nova.log_print(f"NOTE_ENTRY: 15. Note text entered")
             
+            # Step 8.5: (Per-clinic) Check the "Confidential" checkbox before saving
+            if check_confidential:
+                nova.log_print(f"NOTE_ENTRY: 15b. Confidential flag required - ticking 'Confidential' checkbox")
+                try:
+                    # Find the Angular Material checkbox by its visible label text.
+                    # The <input> is class="cdk-visually-hidden" so we can't click it directly;
+                    # click the visible inner container instead, and verify via the input's checked state.
+                    confidential_box = frame_locator.locator(
+                        "mat-checkbox:has-text('Confidential')"
+                    ).first
+                    confidential_box.wait_for(state="visible", timeout=10000)
+                    confidential_box.scroll_into_view_if_needed()
+
+                    hidden_input = confidential_box.locator("input[type='checkbox']").first
+
+                    if hidden_input.is_checked():
+                        nova.log_print(f"NOTE_ENTRY: 15c. 'Confidential' checkbox was already checked")
+                    else:
+                        # Preferred: Playwright's .check() handles hidden inputs when force=True
+                        try:
+                            hidden_input.check(force=True)
+                        except Exception:
+                            # Fallback: click the visible container element
+                            confidential_box.locator(".mat-checkbox-inner-container").first.click()
+
+                        # Give Angular a tick to update aria-checked / bindings
+                        self.page.wait_for_timeout(300)
+
+                        if not hidden_input.is_checked():
+                            raise Exception("Confidential checkbox did not become checked after click")
+
+                        nova.log_print(f"NOTE_ENTRY: 15c. 'Confidential' checkbox is now checked")
+                except Exception as ce:
+                    line_number = sys.exc_info()[2].tb_lineno
+                    nova.log_print(
+                        f"NOTE_ENTRY: #. Failed to check 'Confidential' checkbox: {ce} at line {line_number}"
+                    )
+                    return False
+
             # Step 9: Take screenshot
             screenshot_path = os.path.join(screen_shot_path, screenshot_name)
             self.page.screenshot(path=screenshot_path, full_page=False)

@@ -22,6 +22,12 @@ from modules.note_entry import NoteEntry
 from modules.patient_search import PatientSearch
 from modules.users import get_users
 
+# Clinics that require the "Confidential" checkbox to be ticked on every
+# note before saving. Matched case-insensitively against clinic['Clinic_Name'].
+CLINICS_REQUIRING_CONFIDENTIAL = {
+    "specialists in reproductive medicine & surgery, p.a.",
+}
+
 
 def main():
     """
@@ -229,11 +235,21 @@ def main():
                                                 f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
                                             )
 
+                                            require_confidential = (
+                                                (clinic_name or "").strip().lower()
+                                                in CLINICS_REQUIRING_CONFIDENTIAL
+                                            )
+                                            if require_confidential:
+                                                nova.log_print(
+                                                    f"Clinic: {clinic_name}: Patient: {idx}: "
+                                                    f"NOTE_ENTRY: This clinic requires the Confidential checkbox."
+                                                )
                                             if note_entry.add_new_note(
                                                 note_content=note_content,
                                                 digital_signature=digital_signature_input,
                                                 screen_shot_path=screen_shot_path,
-                                                screenshot_name=screenshot_name
+                                                screenshot_name=screenshot_name,
+                                                check_confidential=require_confidential,
                                             ):
                                                 nova.log_print(
                                                     f"Clinic: {clinic_name}: Patient: {idx}: NOTE_ENTRY: Note added successfully"
