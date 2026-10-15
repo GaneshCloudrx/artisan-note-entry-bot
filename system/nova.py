@@ -113,6 +113,7 @@ def init_heartbeat():
         bot_name=config.HEARTBEAT_BOT_NAME,
         timeout=config.HEARTBEAT_TIMEOUT
     )
+    log_print("Heartbeat manager ready", level="TRACE")
     return heartbeat_manager
 
 

@@ -44,7 +44,7 @@ class HeartbeatManager:
         self.lock = threading.Lock()
         self.is_active = True  # Default to active — only pause on explicit active=0
         self.last_error = None
-        self.last_successful_response = False
+        self.last_successful_response = None  # None until the first heartbeat completes
     
     def is_bot_active(self):
         """
@@ -134,6 +134,8 @@ class HeartbeatManager:
             
             if got_valid_response:
                 # Got valid response - update state based on active status
+                if self.last_successful_response is False:
+                    log_print("Heartbeat API recovered", level="INFO")
                 self.is_active = new_active_state
                 self.last_successful_response = True
                 
@@ -145,4 +147,9 @@ class HeartbeatManager:
                         log_print("Bot paused by server (waiting for activation)", level="WARN")
             else:
                 # Invalid/error response — keep current state, don't pause
+                if self.last_successful_response is not False:
+                    log_print(
+                        f"Heartbeat API error (bot remains {'active' if self.is_active else 'paused'}): {self.last_error}",
+                        level="WARN",
+                    )
                 self.last_successful_response = False
