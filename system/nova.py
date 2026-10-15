@@ -93,14 +93,12 @@ def log_print(message, level=None):
         print(f"[{level or 'TRACE'}] {mask_phi(message)}")
 
 
-def _init_heartbeat():
+def init_heartbeat():
     """
-    Initialize and start the heartbeat manager.
-    Internal function - use initialize() instead.
-    Reads configuration directly from config.py.
+    Create the heartbeat manager. Calls are made explicitly via send_heartbeat().
     
     Returns:
-        HeartbeatManager instance (already started) or None if disabled
+        HeartbeatManager instance or None if disabled
     """
     global heartbeat_manager
     
@@ -113,11 +111,27 @@ def _init_heartbeat():
         auth_header=config.HEARTBEAT_AUTH_HEADER,
         server_name=config.HEARTBEAT_SERVER_NAME,
         bot_name=config.HEARTBEAT_BOT_NAME,
-        interval=config.HEARTBEAT_INTERVAL,
         timeout=config.HEARTBEAT_TIMEOUT
     )
-    heartbeat_manager.start()
     return heartbeat_manager
+
+
+def send_heartbeat():
+    """Send one heartbeat and refresh pause/resume state from the response."""
+    global heartbeat_manager
+    if heartbeat_manager is not None:
+        heartbeat_manager.send()
+
+
+def stop_heartbeat():
+    """Drop the heartbeat manager."""
+    global heartbeat_manager
+    heartbeat_manager = None
+
+
+def _init_heartbeat():
+    """Internal alias - use initialize() / init_heartbeat()."""
+    return init_heartbeat()
 
 
 def _start_recording(output_dir=None, fps=None, quality=None):
@@ -198,9 +212,10 @@ def _wait_for_activation(heartbeat_manager):
         return
     
     import time
-    log_print("Bot paused by server. Waiting for activation...", level="TRACE")
     while not heartbeat_manager.is_bot_active():
-        time.sleep(5)  # Check every 5 seconds
+        log_print("Bot paused by server. Waiting for activation...", level="TRACE")
+        time.sleep(10)
+        heartbeat_manager.send()
 
 
 def _check_and_wait_if_paused_with_manager(heartbeat_manager):
@@ -275,10 +290,8 @@ def stop():
     if screen_recorder:
         _stop_recording()
     
-    # Stop heartbeat manager (if it was started)
-    if heartbeat_manager:
-        heartbeat_manager.stop()
-        heartbeat_manager = None
+    # Drop the heartbeat manager (if it was created)
+    stop_heartbeat()
     
     # Close logger manager (handles both file and API logging cleanup)
     if logger_manager:

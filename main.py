@@ -59,7 +59,10 @@ def main():
             notes = note_data_from_api()
 
             # Step 6: Prepare DataFrames and filter notes by EMR system
-            notes = pd.DataFrame() if notes is None else notes
+            if notes is None:
+                nova.log_print("Note fetch failed - waiting 300 seconds", level="TRACE")
+                time.sleep(300)
+                continue
             if notes.empty:
                 nova.log_print("No notes from API - waiting 300 seconds", level="TRACE")
                 time.sleep(300)
@@ -87,6 +90,7 @@ def main():
 
             if notes.empty:
                 nova.log_print("No notes to process this cycle - waiting 300 seconds", level="TRACE")
+                helper.send_heartbeat()
                 time.sleep(300)
                 continue
 
@@ -330,6 +334,8 @@ def main():
                             f"{note_data.get('note','')}"
                         )
                         total_success += 1
+                        if portal_updated:
+                            helper.send_heartbeat()
                     else:
                         exhausted = current_attempt >= MAX_PATIENT_FAILURES
                         nova.log_print(

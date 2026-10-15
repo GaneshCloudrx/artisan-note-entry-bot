@@ -20,6 +20,9 @@ log_print = nova.log_print
 initialize = nova.initialize
 stop = nova.stop
 check_and_wait_if_paused = nova.check_and_wait_if_paused
+init_heartbeat = nova.init_heartbeat
+send_heartbeat = nova.send_heartbeat
+stop_heartbeat = nova.stop_heartbeat
 
 # Module-level constants
 REPORTS_FOLDER = "reports"
