@@ -1,7 +1,7 @@
 """
 Logger module - handles file logging and async API logging
 """
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import time
 import queue
 import threading
@@ -98,6 +98,24 @@ def mask_phi(message):
     for pattern, replacement in _PHI_PATTERNS:
         text = pattern.sub(replacement, text)
     return text
+
+
+def _portal_timestamp(local_text):
+    """VM-local log time as US Central. Applied only to the portal payload."""
+    fmt = '%Y-%m-%d %H:%M:%S'
+    try:
+        utc = datetime.strptime(local_text, fmt).astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return local_text
+    year = utc.year
+    # 2:00 AM Central on the second Sunday of March, through 2:00 AM Central
+    # on the first Sunday of November.
+    start = datetime(year, 3, 1, tzinfo=timezone.utc)
+    start = start.replace(day=8 + (6 - start.weekday()) % 7, hour=8)
+    end = datetime(year, 11, 1, tzinfo=timezone.utc)
+    end = end.replace(day=1 + (6 - end.weekday()) % 7, hour=7)
+    offset = timedelta(hours=-5 if start <= utc < end else -6)
+    return (utc + offset).strftime(fmt)
 
 
 def _write_queue_error(error_message):
@@ -342,7 +360,7 @@ class LogQueueManager:
                 "server_name": API_SERVER_NAME,
                 "logs": [
                     {
-                        "timestamp": log['timestamp'],
+                        "timestamp": _portal_timestamp(log['timestamp']),
                         "level": log.get('level', 'INFO'),
                         "message": log['message']
                     }

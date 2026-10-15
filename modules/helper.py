@@ -13,7 +13,7 @@ import sys
 from datetime import datetime
 
 import system.nova as nova
-from system.logger import mask_phi
+from system.logger import mask_phi, _portal_timestamp
 
 # Re-export common nova helpers so callers can use helper.* directly
 log_print = nova.log_print
