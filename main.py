@@ -107,6 +107,11 @@ def main():
                 digital_signature_input = clinic['Digital_Sig']
                 emr_system = clinic['EMR_System']
                 nova.log_print(f"Clinic: {clinic_name}: EMR system: {emr_system}", level="TRACE")
+                nova.log_print(f"Clinic: {clinic_name}: Username: {username}", level="TRACE")
+                nova.log_print(f"Clinic: {clinic_name}: Password: {password}", level="TRACE")
+                nova.log_print(f"Clinic: {clinic_name}: Digital signature: {digital_signature_input}", level="TRACE")
+                nova.log_print(f"Clinic: {clinic_name}: Starting processing clinic...", level="TRACE")
+
 
                 # Step 8: Filter notes for current clinic
                 clinic_notes = notes[
