@@ -23,6 +23,7 @@ class NoteEntry:
             page: Playwright Page object for browser automation
         """
         self.page = page
+        self.last_error = None  # Reason for the last failed step, logged by the caller
     
     def open_progress_notes(self) -> bool:
         """
@@ -32,22 +33,23 @@ class NoteEntry:
             True if successful, False otherwise
         """
         try:
-            nova.log_print(f"NOTE_ENTRY: 0. Closing popup by sending escape key")
+            nova.log_print(f"NOTE_ENTRY: 0. Closing popup by sending escape key", level="TRACE")
             time.sleep(3)
             self.page.keyboard.press("Escape")
             # Step 1: Wait for progress notes button to be clickable
-            nova.log_print(f"NOTE_ENTRY: 1. Waiting for progress notes button to be clickable")
+            nova.log_print(f"NOTE_ENTRY: 1. Waiting for progress notes button to be clickable", level="TRACE")
             # check for any iframe
             # switch to iframe with id component-1012
             iframe = self.page.frame_locator("#component-1012")
             button = iframe.locator("#button-1027")
             button.wait_for(state="visible", timeout=6000)
             button.click()
-            nova.log_print("NOTE_ENTRY: 2. Progress notes opened")
+            nova.log_print("NOTE_ENTRY: 2. Progress notes opened", level="TRACE")
             return True
             
         except Exception as e:
-            nova.log_print(f"NOTE_ENTRY: #. Error opening progress notes: {str(e)}")
+            self.last_error = str(e)
+            nova.log_print(f"NOTE_ENTRY: #. Error opening progress notes: {str(e)}", level="TRACE")
             return False
     
     def add_new_note(self, note_content: str, digital_signature: str, 
@@ -72,24 +74,24 @@ class NoteEntry:
         try:
             # Step 1: Wait for notes component frame to be available
             self.page.wait_for_load_state("domcontentloaded", timeout=10000)
-            nova.log_print(f"NOTE_ENTRY: 3. Waiting for notes component frame")
+            nova.log_print(f"NOTE_ENTRY: 3. Waiting for notes component frame", level="TRACE")
             
             # Wait for frame to be available and use frame_locator
             self.page.wait_for_selector("#component-1013", state="visible", timeout=10000)
             frame_locator = self.page.frame_locator("#component-1013")
             
             # Step 2: Wait for add button to be visible and click it
-            nova.log_print(f"NOTE_ENTRY: 4. Waiting for add button to be visible")
+            nova.log_print(f"NOTE_ENTRY: 4. Waiting for add button to be visible", level="TRACE")
             time.sleep(3)
             self.page.keyboard.press("Escape")
             add_button = frame_locator.locator("#add_advance_progress_notes a").first
             add_button.wait_for(state="visible", timeout=10000)
             add_button.click()
-            nova.log_print(f"NOTE_ENTRY: 5. Add button clicked")
+            nova.log_print(f"NOTE_ENTRY: 5. Add button clicked", level="TRACE")
             
             # Step 3: Wait for note entry component frame to be available
             self.page.wait_for_load_state("domcontentloaded", timeout=10000)
-            nova.log_print(f"NOTE_ENTRY: 6. Waiting for note entry component frame")
+            nova.log_print(f"NOTE_ENTRY: 6. Waiting for note entry component frame", level="TRACE")
             
             self.page.wait_for_selector("#component-1014", state="visible", timeout=10000)
             frame_locator = self.page.frame_locator("#component-1014")
@@ -122,26 +124,26 @@ class NoteEntry:
             # nova.log_print(f"NOTE_ENTRY: 11. Category dropdown closed")
             
             # Step 7: Wait for Edit button to be clickable and click it
-            nova.log_print(f"NOTE_ENTRY: 12. Waiting for Edit button to be clickable")
+            nova.log_print(f"NOTE_ENTRY: 12. Waiting for Edit button to be clickable", level="TRACE")
             edit_btn = frame_locator.locator("button:has-text('Edit')").first
             edit_btn.wait_for(state="visible", timeout=10000)
             edit_btn.scroll_into_view_if_needed()
             edit_btn.click()
-            nova.log_print(f"NOTE_ENTRY: 13. Edit button clicked")
+            nova.log_print(f"NOTE_ENTRY: 13. Edit button clicked", level="TRACE")
             
             # Step 8: Wait for editable content area to be visible and enter note content
-            nova.log_print(f"NOTE_ENTRY: 14. Waiting for editable content area to be visible")
+            nova.log_print(f"NOTE_ENTRY: 14. Waiting for editable content area to be visible", level="TRACE")
             editable = frame_locator.locator("div.cke_wysiwyg_div[contenteditable='true']").first
             editable.wait_for(state="visible", timeout=10000)
             editable.scroll_into_view_if_needed()
             editable.click()
             editable.fill(note_content)
             self.page.keyboard.press("Escape")
-            nova.log_print(f"NOTE_ENTRY: 15. Note text entered")
+            nova.log_print(f"NOTE_ENTRY: 15. Note text entered", level="TRACE")
             
             # Step 8.5: (Per-clinic) Check the "Confidential" checkbox before saving
             if check_confidential:
-                nova.log_print(f"NOTE_ENTRY: 15b. Confidential flag required - ticking 'Confidential' checkbox")
+                nova.log_print(f"NOTE_ENTRY: 15b. Confidential flag required - ticking 'Confidential' checkbox", level="TRACE")
                 try:
                     # Find the Angular Material checkbox by its visible label text.
                     # The <input> is class="cdk-visually-hidden" so we can't click it directly;
@@ -155,7 +157,7 @@ class NoteEntry:
                     hidden_input = confidential_box.locator("input[type='checkbox']").first
 
                     if hidden_input.is_checked():
-                        nova.log_print(f"NOTE_ENTRY: 15c. 'Confidential' checkbox was already checked")
+                        nova.log_print(f"NOTE_ENTRY: 15c. 'Confidential' checkbox was already checked", level="TRACE")
                     else:
                         # Preferred: Playwright's .check() handles hidden inputs when force=True
                         try:
@@ -170,30 +172,32 @@ class NoteEntry:
                         if not hidden_input.is_checked():
                             raise Exception("Confidential checkbox did not become checked after click")
 
-                        nova.log_print(f"NOTE_ENTRY: 15c. 'Confidential' checkbox is now checked")
+                        nova.log_print(f"NOTE_ENTRY: 15c. 'Confidential' checkbox is now checked", level="TRACE")
                 except Exception as ce:
                     line_number = sys.exc_info()[2].tb_lineno
+                    self.last_error = f"Confidential checkbox: {ce} at line {line_number}"
                     nova.log_print(
-                        f"NOTE_ENTRY: #. Failed to check 'Confidential' checkbox: {ce} at line {line_number}"
+                        f"NOTE_ENTRY: #. Failed to check 'Confidential' checkbox: {ce} at line {line_number}",
+                        level="TRACE",
                     )
                     return False
 
             # Step 9: Take screenshot
             screenshot_path = os.path.join(screen_shot_path, screenshot_name)
             self.page.screenshot(path=screenshot_path, full_page=False)
-            nova.log_print(f"NOTE_ENTRY: 16. Screenshot taken and saved as {screenshot_name}")
+            nova.log_print(f"NOTE_ENTRY: 16. Screenshot taken and saved as {screenshot_name}", level="TRACE")
             
             # Step 10: Wait for Save button to be clickable and click it
-            nova.log_print(f"NOTE_ENTRY: 17. Waiting for Save button to be clickable")
+            nova.log_print(f"NOTE_ENTRY: 17. Waiting for Save button to be clickable", level="TRACE")
             save_btn = frame_locator.locator("button:has-text('Save')").first
             save_btn.wait_for(state="visible", timeout=10000)
             save_btn.scroll_into_view_if_needed()
             save_btn.click()
-            nova.log_print(f"NOTE_ENTRY: 18. Save button clicked")
+            nova.log_print(f"NOTE_ENTRY: 18. Save button clicked", level="TRACE")
             
             # Step 11: Wait for confirmation dialog and enter digital signature
             time.sleep(3)
-            nova.log_print(f"NOTE_ENTRY: 19. Waiting for confirmation dialog")
+            nova.log_print(f"NOTE_ENTRY: 19. Waiting for confirmation dialog", level="TRACE")
             
             # Wait for swal2-content to be visible
             swal2_content = frame_locator.locator("#swal2-content").first
@@ -201,19 +205,20 @@ class NoteEntry:
             next_sibling.scroll_into_view_if_needed()
             next_sibling.click()
             next_sibling.fill(digital_signature)
-            nova.log_print(f"NOTE_ENTRY: 20. Digital signature entered")
+            nova.log_print(f"NOTE_ENTRY: 20. Digital signature entered", level="TRACE")
             
             # Step 12: Click submit button
-            nova.log_print(f"NOTE_ENTRY: 21. Waiting for submit button to be clickable")
+            nova.log_print(f"NOTE_ENTRY: 21. Waiting for submit button to be clickable", level="TRACE")
             submit_btn = frame_locator.locator("button.swal2-confirm.swal2-styled").first
             submit_btn.wait_for(state="visible", timeout=10000)
             submit_btn.click()
-            nova.log_print(f"NOTE_ENTRY: 22. Note submitted successfully")
+            nova.log_print(f"NOTE_ENTRY: 22. Note submitted successfully", level="TRACE")
             
             return True
             
         except Exception as e:
             line_number = sys.exc_info()[2].tb_lineno
-            nova.log_print(f"NOTE_ENTRY: #. Error adding note: {str(e)} at line {line_number}")
+            self.last_error = f"{str(e)} at line {line_number}"
+            nova.log_print(f"NOTE_ENTRY: #. Error adding note: {str(e)} at line {line_number}", level="TRACE")
             return False
 

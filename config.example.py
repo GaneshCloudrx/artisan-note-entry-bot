@@ -47,6 +47,7 @@ API_LOG_ENDPOINT = "https://devc.reuniterx.com/api/v1/webservice/endpoint/rpa_ge
 API_LOG_BATCH_SIZE = 10
 API_LOG_BATCH_INTERVAL = 5
 API_LOG_ENABLED = True
+API_LOG_MIN_LEVEL = "INFO"  # TRACE stays in the local log; INFO and above also go to the portal
 
 MACHINE_NAME = "CLDRPA165"
 BOT_NAME = "Artisan Note Entry BOT"

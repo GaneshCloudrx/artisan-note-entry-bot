@@ -6,9 +6,9 @@ import time
 import requests
 
 # Simple print function - will be replaced by logger when initialized
-def _log_print(message):
+def _log_print(message, level=None):
     """Fallback print function - logger will override this"""
-    print(message)
+    print(f"[{level or 'TRACE'}] {message}")
 
 # This will be set by helper module when logger is initialized
 log_print = _log_print
@@ -57,14 +57,14 @@ class HeartbeatManager:
             daemon=True  # Daemon thread - doesn't prevent program exit
         )
         self.thread.start()
-        log_print("Heartbeat manager started")
+        log_print("Heartbeat manager started", level="TRACE")
     
     def stop(self):
         """Stop heartbeat thread"""
         self.running = False
         if self.thread:
             self.thread.join(timeout=5)
-        log_print("Heartbeat manager stopped")
+        log_print("Heartbeat manager stopped", level="TRACE")
     
     def is_bot_active(self):
         """
@@ -170,15 +170,15 @@ class HeartbeatManager:
                 # Log state changes
                 if old_state != new_active_state:
                     if new_active_state:
-                        log_print("Bot activated by server (resuming)")
+                        log_print("Bot activated by server (resuming)", level="INFO")
                     else:
-                        log_print("Bot paused by server (waiting for activation)")
+                        log_print("Bot paused by server (waiting for activation)", level="WARN")
             else:
                 # Invalid/error response - pause bot until we get good response
                 if self.is_active or not self.last_successful_response:
                     # Only log if state changed or if this is first error
                     if self.is_active:
-                        log_print(f"Bot paused due to invalid API response. Waiting for valid response... (Error: {self.last_error})")
+                        log_print(f"Bot paused due to invalid heartbeat API response: {self.last_error}", level="WARN")
                     self.is_active = False
                     self.last_successful_response = False
 

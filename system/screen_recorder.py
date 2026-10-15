@@ -12,9 +12,9 @@ import cv2
 import config
 
 # Simple print function - will be replaced by logger when initialized
-def _log_print(message):
+def _log_print(message, level=None):
     """Fallback print function - logger will override this"""
-    print(message)
+    print(f"[{level or 'TRACE'}] {message}")
 
 # This will be set by helper module when logger is initialized
 log_print = _log_print
@@ -68,12 +68,12 @@ class ScreenRecorder:
                 else:
                     # Use default AWS credentials (from ~/.aws/credentials or environment)
                     self.s3_client = boto3.client('s3', region_name=config.UPLOAD_RECORDING_S3_REGION)
-                log_print("S3 client initialized for recording uploads")
+                log_print("S3 client initialized for recording uploads", level="TRACE")
             except ImportError:
-                log_print("WARNING: boto3 not installed. S3 upload disabled.")
+                log_print("boto3 not installed - S3 upload of recordings disabled", level="WARN")
                 self.s3_enabled = False
             except Exception as e:
-                log_print(f"WARNING: Failed to initialize S3 client: {str(e)}")
+                log_print(f"Failed to initialize S3 client: {str(e)} - S3 upload of recordings disabled", level="WARN")
                 self.s3_enabled = False
         
         # Quality settings for video encoding
@@ -87,12 +87,12 @@ class ScreenRecorder:
         # Create output directory if it doesn't exist
         os.makedirs(self.output_dir, exist_ok=True)
         
-        log_print(f"Screen recorder initialized (FPS: {self.fps}, Quality: {self.quality}, Segments: {segment_duration_minutes} min)")
+        log_print(f"Screen recorder initialized (FPS: {self.fps}, Quality: {self.quality}, Segments: {segment_duration_minutes} min)", level="TRACE")
     
     def start_recording(self):
         """Start recording screen in background thread."""
         if self.recording:
-            log_print("Recording already in progress")
+            log_print("Recording already in progress", level="TRACE")
             return False
         
         self.recording = True
@@ -105,16 +105,15 @@ class ScreenRecorder:
         self.thread = threading.Thread(target=self._record_loop, daemon=True)
         self.thread.start()
         
-        log_print(f"Screen recording started (FPS: {self.fps}, Quality: {self.quality}, {config.RECORDING_SEGMENT_DURATION} min segments)")
         return True
     
     def stop_recording(self):
         """Stop recording and save final video segment."""
         if not self.recording:
-            log_print("No recording in progress")
+            log_print("No recording in progress", level="TRACE")
             return None
         
-        log_print("Stopping screen recording...")
+        log_print("Stopping screen recording...", level="TRACE")
         
         # Stop recording loop
         self.recording = False
@@ -127,15 +126,14 @@ class ScreenRecorder:
         if self.frames:
             try:
                 filename = self._save_current_segment()
-                log_print(f"Final recording segment saved: {filename}")
+                log_print(f"Final recording segment saved: {filename}", level="TRACE")
                 return filename
             except Exception as e:
-                log_print(f"Error saving final segment: {str(e)}")
                 import traceback
-                log_print(f"Traceback: {traceback.format_exc()}")
+                log_print(f"Error saving final recording segment: {str(e)}\n{traceback.format_exc()}", level="ERROR")
                 return None
         else:
-            log_print("No frames captured - nothing to save")
+            log_print("No frames captured - nothing to save", level="TRACE")
             return None
     
     def _record_loop(self):
@@ -151,7 +149,8 @@ class ScreenRecorder:
         width = monitor["width"]
         height = monitor["height"]
         
-        log_print(f"Recording screen: {width}x{height} at {self.fps} FPS")
+        log_print(f"Recording screen: {width}x{height} at {self.fps} FPS", level="TRACE")
+        capture_error_logged = False
         
         while self.recording:
             try:
@@ -176,16 +175,19 @@ class ScreenRecorder:
                         self.frames.append(img.copy())
                     
                     last_capture_time = current_time
+                    capture_error_logged = False
                 else:
                     # Sleep a bit to avoid busy waiting
                     time.sleep(0.01)
                     
             except Exception as e:
-                # Log error but continue recording
-                log_print(f"Error capturing frame: {str(e)}")
+                # Log error but continue recording; once per run of failing frames
+                if not capture_error_logged:
+                    log_print(f"Error capturing frame: {str(e)} - recording continues", level="ERROR")
+                    capture_error_logged = True
                 time.sleep(0.1)
         
-        log_print(f"Recording stopped - captured {len(self.frames)} frames in current segment")
+        log_print(f"Recording stopped - captured {len(self.frames)} frames in current segment", level="TRACE")
     
     def _save_and_start_new_segment(self):
         """Save current segment and start a new one."""
@@ -209,7 +211,7 @@ class ScreenRecorder:
             self.current_segment += 1
             self.segment_start_time = time.time()
             
-            log_print(f"Segment {self.current_segment} saved. Starting segment {self.current_segment + 1}...")
+            log_print(f"Segment {self.current_segment} saved. Starting segment {self.current_segment + 1}...", level="TRACE")
     
     def _save_current_segment(self):
         """Save current frames to video file."""
@@ -242,19 +244,19 @@ class ScreenRecorder:
             
             # Write all frames
             frames_to_save = self.frames.copy()
-            log_print(f"Saving segment {self.current_segment + 1}: {len(frames_to_save)} frames...")
+            log_print(f"Saving segment {self.current_segment + 1}: {len(frames_to_save)} frames...", level="TRACE")
             
             for i, frame in enumerate(frames_to_save):
                 out.write(frame)
                 if (i + 1) % 100 == 0:
-                    log_print(f"Saved {i + 1}/{len(frames_to_save)} frames...")
+                    log_print(f"Saved {i + 1}/{len(frames_to_save)} frames...", level="TRACE")
             
             # Release video writer
             out.release()
             
             # Get file size
             file_size_mb = os.path.getsize(self.current_filename) / (1024 * 1024)
-            log_print(f"Segment {self.current_segment + 1} saved: {self.current_filename} ({file_size_mb:.2f} MB)")
+            log_print(f"Segment {self.current_segment + 1} saved: {self.current_filename} ({file_size_mb:.2f} MB)", level="TRACE")
             
             return self.current_filename
     
@@ -271,7 +273,7 @@ class ScreenRecorder:
             file_size = os.path.getsize(file_path)
             file_size_mb = file_size / (1024 * 1024)
             
-            log_print(f"Uploading to S3: {filename} ({file_size_mb:.2f} MB)...")
+            log_print(f"Uploading to S3: {filename} ({file_size_mb:.2f} MB)...", level="TRACE")
             
             # Use boto3's S3Transfer for multipart upload with optimized settings
             from boto3.s3.transfer import TransferConfig, S3Transfer
@@ -292,20 +294,19 @@ class ScreenRecorder:
                 s3_key
             )
             
-            log_print(f"Successfully uploaded to S3: s3://{config.UPLOAD_RECORDING_S3_BUCKET}/{s3_key}")
+            log_print(f"Uploaded to S3: s3://{config.UPLOAD_RECORDING_S3_BUCKET}/{s3_key}", level="TRACE")
             
             # Delete local file if configured
             if config.UPLOAD_RECORDING_DELETE_AFTER_UPLOAD:
                 try:
                     os.remove(file_path)
-                    log_print(f"Deleted local file after successful upload: {filename}")
+                    log_print(f"Deleted local file after successful upload: {filename}", level="TRACE")
                 except Exception as e:
-                    log_print(f"Warning: Failed to delete local file {filename}: {str(e)}")
+                    log_print(f"Failed to delete local recording {filename} after upload: {str(e)}", level="WARN")
                     
         except Exception as e:
-            log_print(f"Error uploading to S3: {str(e)}")
             import traceback
-            log_print(f"Traceback: {traceback.format_exc()}")
+            log_print(f"Error uploading recording to S3: {str(e)}\n{traceback.format_exc()}", level="ERROR")
             # Don't delete file if upload failed
     
     

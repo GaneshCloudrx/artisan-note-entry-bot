@@ -120,9 +120,10 @@ def load_patient_report():
                     }))
     except Exception as exc:
         nova.log_print(
-            "REPORT: Failed to load patient report '{path}': {err}".format(
+            "REPORT: Failed to load patient report '{path}': {err} - continuing without it".format(
                 path=report_path, err=exc
-            )
+            ),
+            level="WARN",
         )
 
     return report_dict, content_keys
@@ -165,9 +166,10 @@ def save_patient_to_report(note_data, status, failure_count):
             writer.writerow(row)
     except Exception as exc:
         nova.log_print(
-            "REPORT: Failed to append row to '{path}': {err}".format(
-                path=report_path, err=exc
-            )
+            "REPORT: Failed to append row for note_id={nid} to '{path}': {err}".format(
+                nid=note_data.get("note_id", ""), path=report_path, err=exc
+            ),
+            level="ERROR",
         )
 
 
@@ -235,7 +237,8 @@ def filter_notes_by_report(notes_dataframe, patient_report, content_keys, update
                     nid=note_id,
                     first=note_dict.get("patient_first_name", ""),
                     last=note_dict.get("patient_last_name", ""),
-                )
+                ),
+                level="WARN",
             )
             try:
                 if callable(update_api_fn):
@@ -244,7 +247,8 @@ def filter_notes_by_report(notes_dataframe, patient_report, content_keys, update
                 nova.log_print(
                     "REPORT: update_api_fn failed for duplicate note_id={nid}: {err}".format(
                         nid=note_id, err=exc
-                    )
+                    ),
+                    level="ERROR",
                 )
 
             save_patient_to_report(note_dict, "success", 0)
@@ -290,11 +294,12 @@ def take_screenshot(page=None, prefix="screenshot"):
         )
         path = os.path.join(screenshots_dir, filename)
         page.screenshot(path=path, full_page=False)
-        nova.log_print("SCREENSHOT: Saved to {path}".format(path=path))
+        nova.log_print("SCREENSHOT: Saved to {path}".format(path=path), level="TRACE")
         return path
     except Exception as exc:
         line_number = sys.exc_info()[2].tb_lineno if sys.exc_info()[2] else "?"
         nova.log_print(
-            "SCREENSHOT: Failed ({err}) at line {ln}".format(err=exc, ln=line_number)
+            "SCREENSHOT: Failed ({err}) at line {ln}".format(err=exc, ln=line_number),
+            level="WARN",
         )
         return None

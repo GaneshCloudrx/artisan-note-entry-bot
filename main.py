@@ -36,14 +36,14 @@ def main():
     # Step 1: Initialize all components (logger, heartbeat, recording) based on config
     nova.initialize()
 
-    nova.log_print("=== Bot started ===")
+    nova.log_print("Bot started", level="INFO")
 
     try:
         # Step 2: Wait for bot to be activated (if heartbeat is enabled)
         nova.check_and_wait_if_paused()
 
         # Step 3: Initialize browser manager and directories
-        nova.log_print("Starting main bot loop...")
+        nova.log_print("Starting main bot loop...", level="TRACE")
         browser_manager = BrowserManager()
         paths = browser_manager.initialize_directories()
         screen_shot_path = paths['screen_shot_path']
@@ -54,14 +54,14 @@ def main():
             nova.check_and_wait_if_paused()
 
             # Step 5: Fetch clinics and notes from API
-            nova.log_print("Fetching clinics and notes from API...")
+            nova.log_print("Fetching clinics and notes from API...", level="TRACE")
             clinics = get_users()
             notes = note_data_from_api()
 
             # Step 6: Prepare DataFrames and filter notes by EMR system
             notes = pd.DataFrame() if notes is None else notes
             if notes.empty:
-                nova.log_print("No notes found")
+                nova.log_print("No notes from API - waiting 300 seconds", level="TRACE")
                 time.sleep(300)
                 continue
             notes["emr_system"] = [emr_system.lower() for emr_system in notes['emr_system']]
@@ -80,11 +80,13 @@ def main():
                 notes, patient_report, content_keys, update_api
             )
             if skipped:
-                helper.log_print(f"Skipping {len(skipped)} already processed patients")
+                helper.log_print(
+                    f"Skipped {len(skipped)} notes (already processed, max failures reached or duplicate content)",
+                    level="TRACE",
+                )
 
             if notes.empty:
-                nova.log_print("No notes to process this cycle (all skipped or none returned).")
-                helper.log_print("SESSION SUMMARY: 0 success, 0 failed")
+                nova.log_print("No notes to process this cycle - waiting 300 seconds", level="TRACE")
                 time.sleep(300)
                 continue
 
@@ -100,12 +102,10 @@ def main():
                 password = clinic['Password1']
                 digital_signature_input = clinic['Digital_Sig']
                 emr_system = clinic['EMR_System']
-                nova.log_print(f"Clinic: {clinic_name}: Username: {username}")
-                nova.log_print(f"Clinic: {clinic_name}: Password: {password}")
-                nova.log_print(f"Clinic: {clinic_name}: Digital signature: {digital_signature_input}")
-                nova.log_print(f"Clinic: {clinic_name}: EMR system: {emr_system}")
-
-                nova.log_print(f"Clinic: {clinic_name}: Starting processing clinic...")
+                nova.log_print(f"Clinic: {clinic_name}: Username: {username}", level="TRACE")
+                nova.log_print(f"Clinic: {clinic_name}: Password: {password}", level="TRACE")
+                nova.log_print(f"Clinic: {clinic_name}: Digital signature: {digital_signature_input}", level="TRACE")
+                nova.log_print(f"Clinic: {clinic_name}: EMR system: {emr_system}", level="TRACE")
 
                 # Step 8: Filter notes for current clinic
                 clinic_notes = notes[
@@ -113,7 +113,10 @@ def main():
                     (notes['emr_system'] == emr_system)
                 ].reset_index(drop=True)
 
-                nova.log_print(f"Clinic: {clinic_name}: Found {len(clinic_notes)} notes")
+                nova.log_print(
+                    f"Clinic: {clinic_name}: Starting processing clinic ({len(clinic_notes)} notes)",
+                    level="INFO" if len(clinic_notes) else "TRACE",
+                )
 
                 # Step 9: Process each note for the clinic
                 for idx, note in clinic_notes.iterrows():
@@ -124,10 +127,10 @@ def main():
                     patient_first_name = note_data['patient_first_name'].strip().split(" ")[0].split("-")[0]
                     patient_last_name = note_data['patient_last_name']
                     patient_dob_raw = note_data['patient_dob']
-                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Patient first name: {patient_first_name}")
-                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Patient last name: {patient_last_name}")
-                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Patient dob: {patient_dob_raw}")
-                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Patient note: {note_content}")
+                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Patient first name: {patient_first_name}", level="TRACE")
+                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Patient last name: {patient_last_name}", level="TRACE")
+                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Patient dob: {patient_dob_raw}", level="TRACE")
+                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Patient note: {note_content}", level="TRACE")
 
                     # FEATURE 2 - Per-note attempt tracking
                     report_key = (
@@ -143,7 +146,8 @@ def main():
                     current_attempt = prior_failures + 1
                     helper.log_print(
                         f"Attempt {current_attempt}/{MAX_PATIENT_FAILURES} for note_id={note_id} "
-                        f"(patient {patient_first_name} {patient_last_name}, clinic {clinic_name})"
+                        f"(patient {patient_first_name} {patient_last_name}, clinic {clinic_name})",
+                        level="TRACE",
                     )
 
                     # Step 10: Format patient date of birth (for EMR search)
@@ -155,11 +159,13 @@ def main():
                     # Step 11: Construct patient full name
                     patient_full_name = patient_last_name + ", " + patient_first_name
 
-                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Starting note entry...")
+                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Starting note entry...", level="TRACE")
 
                     # Per-note outcome state
                     note_succeeded = False
                     note_status = 'failed'  # default if anything goes wrong
+                    failure_reason = None   # logged once in the post-attempt outcome line
+                    portal_updated = False
 
                     # Step 12: Launch browser and process note
                     playwright, user_data_dir, extension_path = browser_manager.create_browser_context()
@@ -183,7 +189,7 @@ def main():
 
                         try:
                             # Step 13: Login to EMR system
-                            nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: LOGIN: Starting login process...")
+                            nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: LOGIN: Starting login process...", level="TRACE")
                             login_handler = Login(page)
 
                             if not login_handler.login(
@@ -192,18 +198,16 @@ def main():
                                 password=password,
                                 digital_signature=digital_signature_input
                             ):
-                                nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: LOGIN: Login failed")
+                                failure_reason = f"login: {login_handler.last_error or 'failed'}"
                                 note_status = 'failed'
                             else:
-                                nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: LOGIN: Login successful")
+                                nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: LOGIN: Login successful", level="TRACE")
 
                                 # Step 14: Navigate to Clinical Info and search for patient
                                 patient_search = PatientSearch(page)
 
                                 if not patient_search.navigate_to_clinical_info():
-                                    nova.log_print(
-                                        f"Clinic: {clinic_name}: Patient: {idx}: PATIENT_SEARCH: Failed to navigate to Clinical Info"
-                                    )
+                                    failure_reason = f"navigate to Clinical Info: {patient_search.last_error or 'failed'}"
                                     note_status = 'failed'
                                 else:
                                     search_success, match_count = patient_search.search_patient(
@@ -211,22 +215,19 @@ def main():
                                     )
 
                                     if not search_success:
-                                        nova.log_print(
-                                            f"Clinic: {clinic_name}: Patient: {idx}: PATIENT_SEARCH: No patient matches found"
-                                        )
+                                        failure_reason = f"patient search: {patient_search.last_error or 'no match'}"
                                         note_status = 'verification_failed'
                                     else:
                                         nova.log_print(
-                                            f"Clinic: {clinic_name}: Patient: {idx}: PATIENT_SEARCH: Patient found and selected"
+                                            f"Clinic: {clinic_name}: Patient: {idx}: PATIENT_SEARCH: Patient found and selected",
+                                            level="TRACE",
                                         )
 
                                         # Step 15: Open progress notes
                                         note_entry = NoteEntry(page)
 
                                         if not note_entry.open_progress_notes():
-                                            nova.log_print(
-                                                f"Clinic: {clinic_name}: Patient: {idx}: NOTE_ENTRY: Failed to open progress notes"
-                                            )
+                                            failure_reason = f"open progress notes: {note_entry.last_error or 'failed'}"
                                             note_status = 'failed'
                                         else:
                                             # Step 16: Add note to patient record
@@ -242,7 +243,8 @@ def main():
                                             if require_confidential:
                                                 nova.log_print(
                                                     f"Clinic: {clinic_name}: Patient: {idx}: "
-                                                    f"NOTE_ENTRY: This clinic requires the Confidential checkbox."
+                                                    f"NOTE_ENTRY: This clinic requires the Confidential checkbox.",
+                                                    level="TRACE",
                                                 )
                                             if note_entry.add_new_note(
                                                 note_content=note_content,
@@ -252,19 +254,20 @@ def main():
                                                 check_confidential=require_confidential,
                                             ):
                                                 nova.log_print(
-                                                    f"Clinic: {clinic_name}: Patient: {idx}: NOTE_ENTRY: Note added successfully"
+                                                    f"Clinic: {clinic_name}: Patient: {idx}: NOTE_ENTRY: Note added successfully",
+                                                    level="TRACE",
                                                 )
 
                                                 # Step 17: Update note status in API
-                                                update_api(note_id)
-                                                nova.log_print(
-                                                    f"Clinic: {clinic_name}: Patient: {idx}: API: Note updated in API"
-                                                )
+                                                portal_updated = update_api(note_id)
+                                                if portal_updated:
+                                                    nova.log_print(
+                                                        f"Clinic: {clinic_name}: Patient: {idx}: API: Note updated in API",
+                                                        level="TRACE",
+                                                    )
                                                 note_succeeded = True
                                             else:
-                                                nova.log_print(
-                                                    f"Clinic: {clinic_name}: Patient: {idx}: NOTE_ENTRY: Failed to add note"
-                                                )
+                                                failure_reason = f"add note: {note_entry.last_error or 'failed'}"
                                                 note_status = 'failed'
 
                             # Step 18: Logout from EMR system (currently disabled)
@@ -276,17 +279,13 @@ def main():
 
                         except PlaywrightTimeoutError as te:
                             line_number = sys.exc_info()[2].tb_lineno
-                            nova.log_print(
-                                f"Clinic: {clinic_name}: Patient: {idx}: Timeout: {te} at line {line_number}"
-                            )
+                            failure_reason = f"timeout: {te} at line {line_number}"
                             note_status = 'timeout'
                         except Exception as e:
                             line_number = sys.exc_info()[2].tb_lineno
-                            nova.log_print(
-                                f"Clinic: {clinic_name}: Patient: {idx}: Error: {e} at line {line_number}"
-                            )
+                            failure_reason = f"error: {e} at line {line_number}"
                             import traceback
-                            nova.log_print(f"Traceback: {traceback.format_exc()}")
+                            nova.log_print(f"Traceback: {traceback.format_exc()}", level="TRACE")
                             note_status = 'failed'
                         finally:
                             # Take screenshot on failed attempts >= 2 BEFORE closing the page
@@ -297,7 +296,7 @@ def main():
                                         prefix=f"note_entry_failed_attempt{current_attempt}"
                                     )
                                 except Exception as ss_exc:
-                                    nova.log_print(f"Failed to capture failure screenshot: {ss_exc}")
+                                    nova.log_print(f"Failed to capture failure screenshot: {ss_exc}", level="WARN")
 
                             # Ensure browser is closed
                             try:
@@ -310,11 +309,16 @@ def main():
                                     context.close()
                             except Exception:
                                 pass
-                            nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Browser closed")
+                            nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Browser closed", level="TRACE")
                             time.sleep(3)
 
                     # ----- Post-attempt bookkeeping (Feature 1 + Feature 2) -----
                     if note_succeeded:
+                        nova.log_print(
+                            f"Clinic: {clinic_name}: Note {note_id} entered in Artisan"
+                            + ("" if portal_updated else " (portal status update failed)"),
+                            level="INFO",
+                        )
                         helper.save_patient_to_report(note_data, 'success', 0)
                         patient_report[report_key] = {
                             'status': 'success',
@@ -330,6 +334,13 @@ def main():
                         )
                         total_success += 1
                     else:
+                        exhausted = current_attempt >= MAX_PATIENT_FAILURES
+                        nova.log_print(
+                            f"Clinic: {clinic_name}: Note {note_id} failed "
+                            f"(attempt {current_attempt}/{MAX_PATIENT_FAILURES}) at {failure_reason or 'unknown step'}"
+                            + (" - all attempts exhausted" if exhausted else " - will retry"),
+                            level="ERROR" if exhausted else "WARN",
+                        )
                         helper.save_patient_to_report(note_data, note_status, current_attempt)
                         patient_report[report_key] = {
                             'failure_count': str(current_attempt),
@@ -354,21 +365,23 @@ def main():
 
             # Session summary after all clinics processed this cycle
             helper.log_print(
-                f"SESSION SUMMARY: {total_success} success, {total_fail} failed"
+                f"Session summary: {total_success} success, {total_fail} failed",
+                level="INFO" if (total_success or total_fail) else "TRACE",
             )
 
             # Step 20: Wait before next iteration
-            nova.log_print("Waiting 300 seconds before next iteration...")
+            nova.log_print("Waiting 300 seconds before next iteration...", level="TRACE")
             time.sleep(300)
 
     except KeyboardInterrupt:
-        line_number = sys.exc_info()[2].tb_lineno
-        nova.log_print(f"\n=== Bot stopped by user at line {line_number} ===")
+        nova.log_print("Bot stopped by user", level="INFO")
     except Exception as e:
         line_number = sys.exc_info()[2].tb_lineno
-        nova.log_print(f"An error occurred: {str(e)} at line {line_number}")
         import traceback
-        nova.log_print(f"Traceback: {traceback.format_exc()}")
+        nova.log_print(
+            f"Bot crashed: {str(e)} at line {line_number}\n{traceback.format_exc()}",
+            level="FATAL",
+        )
     finally:
         # Step 21: Stop all components (logger, heartbeat, recording)
         nova.stop()
