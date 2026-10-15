@@ -73,7 +73,7 @@ class PatientSearch:
             last_name = patient_full_name.split(", ")[0] if ", " in patient_full_name else patient_full_name
             search_text = f"{last_name}, {first_name_clean}".strip()
 
-            nova.log_print(f"PATIENT_SEARCH: 6. Typing search text: '{search_text}'", level="TRACE")
+            nova.log_print("PATIENT_SEARCH: 6. Typing search text", level="TRACE")
             patient_search_field.scroll_into_view_if_needed()
             patient_search_field.click()
             patient_search_field.fill(search_text)
@@ -84,7 +84,7 @@ class PatientSearch:
 
             # DOB prefix for matching (first 5 chars = "MM/DD")
             dob_prefix = patient_dob[:5] if patient_dob and len(patient_dob) >= 5 else ""
-            nova.log_print(f"PATIENT_SEARCH: 8. Will match DOB prefix: '{dob_prefix}'", level="TRACE")
+            nova.log_print("PATIENT_SEARCH: 8. Matching on DOB prefix", level="TRACE")
 
             # Step 5: Loop through rows - press down arrow, then tab to auto-populate
             for row_idx in range(max_rows):
@@ -98,7 +98,7 @@ class PatientSearch:
 
                 # Scrape the auto-populated text from the search field
                 populated_text = patient_search_field.input_value()
-                nova.log_print(f"PATIENT_SEARCH: 11. Row {row_idx + 1}/{max_rows} - populated text: '{populated_text}'", level="TRACE")
+                nova.log_print(f"PATIENT_SEARCH: 11. Row {row_idx + 1}/{max_rows} - details populated", level="TRACE")
 
                 # Check if DOB prefix is in the populated details
                 if dob_prefix and dob_prefix in populated_text:
@@ -106,7 +106,7 @@ class PatientSearch:
                     self.page.wait_for_load_state("domcontentloaded", timeout=30000)
                     return True, 1
                 else:
-                    nova.log_print(f"PATIENT_SEARCH: 12. Row {row_idx + 1} - DOB '{dob_prefix}' not found in '{populated_text}', trying next...", level="TRACE")
+                    nova.log_print(f"PATIENT_SEARCH: 12. Row {row_idx + 1} - DOB prefix not found, trying next...", level="TRACE")
                     # Click back into the field to continue searching
                     patient_search_field.click()
                     patient_search_field.fill(search_text)

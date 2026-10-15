@@ -13,6 +13,7 @@ import sys
 from datetime import datetime
 
 import system.nova as nova
+from system.logger import mask_phi
 
 # Re-export common nova helpers so callers can use helper.* directly
 log_print = nova.log_print
@@ -232,11 +233,8 @@ def filter_notes_by_report(notes_dataframe, patient_report, content_keys, update
         if content_key in content_keys:
             note_id = note_dict.get("note_id", "")
             nova.log_print(
-                "REPORT: Duplicate content detected for note_id={nid} "
-                "(patient {first} {last}); marking complete via API.".format(
+                "REPORT: Duplicate content detected for note_id={nid}; marking complete via API.".format(
                     nid=note_id,
-                    first=note_dict.get("patient_first_name", ""),
-                    last=note_dict.get("patient_last_name", ""),
                 ),
                 level="WARN",
             )

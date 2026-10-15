@@ -244,8 +244,8 @@ def log_error_to_portal(patient_name, patient_dob, clinic_name, emr_system,
 
     try:
         nova.log_print(
-            "ERROR_PORTAL: Escalating error for patient '{name}' (clinic={clinic}, emr={emr})".format(
-                name=patient_name, clinic=clinic_name, emr=emr_system
+            "ERROR_PORTAL: Escalating error (clinic={clinic}, emr={emr})".format(
+                clinic=clinic_name, emr=emr_system
             ),
             level="TRACE",
         )

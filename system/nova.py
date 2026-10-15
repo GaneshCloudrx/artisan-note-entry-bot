@@ -89,7 +89,8 @@ def log_print(message, level=None):
         logger_manager.log_print(message, level=level)
     else:
         # Fallback to console if logger not initialized
-        print(f"[{level or 'TRACE'}] {message}")
+        from system.logger import mask_phi
+        print(f"[{level or 'TRACE'}] {mask_phi(message)}")
 
 
 def _init_heartbeat():

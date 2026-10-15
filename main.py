@@ -102,9 +102,6 @@ def main():
                 password = clinic['Password1']
                 digital_signature_input = clinic['Digital_Sig']
                 emr_system = clinic['EMR_System']
-                nova.log_print(f"Clinic: {clinic_name}: Username: {username}", level="TRACE")
-                nova.log_print(f"Clinic: {clinic_name}: Password: {password}", level="TRACE")
-                nova.log_print(f"Clinic: {clinic_name}: Digital signature: {digital_signature_input}", level="TRACE")
                 nova.log_print(f"Clinic: {clinic_name}: EMR system: {emr_system}", level="TRACE")
 
                 # Step 8: Filter notes for current clinic
@@ -127,10 +124,10 @@ def main():
                     patient_first_name = note_data['patient_first_name'].strip().split(" ")[0].split("-")[0]
                     patient_last_name = note_data['patient_last_name']
                     patient_dob_raw = note_data['patient_dob']
-                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Patient first name: {patient_first_name}", level="TRACE")
-                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Patient last name: {patient_last_name}", level="TRACE")
-                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Patient dob: {patient_dob_raw}", level="TRACE")
-                    nova.log_print(f"Clinic: {clinic_name}: Patient: {idx}: Patient note: {note_content}", level="TRACE")
+                    nova.log_print(
+                        f"Clinic: {clinic_name}: note_id={note_id} ({len(str(note_content))} chars)",
+                        level="TRACE",
+                    )
 
                     # FEATURE 2 - Per-note attempt tracking
                     report_key = (
@@ -146,7 +143,7 @@ def main():
                     current_attempt = prior_failures + 1
                     helper.log_print(
                         f"Attempt {current_attempt}/{MAX_PATIENT_FAILURES} for note_id={note_id} "
-                        f"(patient {patient_first_name} {patient_last_name}, clinic {clinic_name})",
+                        f"(clinic {clinic_name})",
                         level="TRACE",
                     )
 

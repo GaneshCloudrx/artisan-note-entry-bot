@@ -8,6 +8,11 @@ import requests
 # Simple print function - will be replaced by logger when initialized
 def _log_print(message, level=None):
     """Fallback print function - logger will override this"""
+    try:
+        from system.logger import mask_phi
+        message = mask_phi(message)
+    except Exception:
+        pass
     print(f"[{level or 'TRACE'}] {message}")
 
 # This will be set by helper module when logger is initialized

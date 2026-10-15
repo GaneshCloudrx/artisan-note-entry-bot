@@ -7,6 +7,7 @@ import queue
 import threading
 import requests
 import os
+import re
 import config
 from config import (
     API_BASE_URL, API_AUTH_HEADER, API_SERVER_NAME, API_BOT_NAME, 
@@ -63,6 +64,55 @@ def infer_level(message):
 
 def should_send_to_api(level):
     return LOG_LEVELS.get(level, 0) >= LOG_LEVELS.get(normalize_level(API_LOG_MIN_LEVEL) or "INFO", 1)
+
+
+# === PHI masking (safety net for what is stored on the VM) ===
+# Applied to the local log file and the console. The portal upload keeps the
+# original message. \b / lookbehinds keep digits inside file names intact.
+def _last4(value):
+    """Keep the last 4 characters and hide the rest."""
+    value = str(value)
+    if len(value) <= 4:
+        return "****"
+    return "****" + value[-4:]
+
+
+_PHI_PATTERNS = [
+    (re.compile(r"([\w.+-]+)@[\w-]+(?:\.[\w-]+)+"), lambda m: _last4(m.group(1))),
+    (re.compile(r"\b((?:MRN|SSN|member|policy|insurance|account|acct|claim|patient[ _]?id)"
+                r"\s*(?:id|no|number|#)?\s*[:#=]?\s*)(?=[A-Za-z0-9-]*\d)([A-Za-z0-9-]{4,})",
+                re.IGNORECASE),
+     lambda m: m.group(1) + _last4(m.group(2))),
+    (re.compile(r"\b\d{3}-\d{2}-(\d{4})\b"), lambda m: "****" + m.group(1)),
+    (re.compile(r"(?<![\w*])(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?(\d{4})\b"),
+     lambda m: "****" + m.group(1)),
+    (re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"), lambda m: _last4(m.group(0))),
+    (re.compile(r"\b(?:19|20)\d{2}[/-]\d{1,2}[/-]\d{1,2}\b"), lambda m: _last4(m.group(0))),
+    (re.compile(r"\b(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:19|20)\d{2}\b"), lambda m: _last4(m.group(0))),
+]
+
+
+def mask_phi(message):
+    """Mask email, labelled IDs, SSN, phone and date patterns, keeping the last 4 characters."""
+    text = str(message)
+    for pattern, replacement in _PHI_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _write_queue_error(error_message):
+    """Write a masked [LOG QUEUE ERROR] line to the console and the daily log file."""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    stored = mask_phi(f"[LOG QUEUE ERROR] {error_message}")
+    print(f"[ERROR] {stored}")
+    try:
+        log_dir = "logs"
+        os.makedirs(log_dir, exist_ok=True)
+        path = os.path.join(log_dir, f"log_{datetime.now().strftime('%Y-%m-%d')}.txt")
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{timestamp} - ERROR - {stored}\n")
+    except Exception:
+        pass
 
 
 def _parse_log_line(line):
@@ -140,19 +190,20 @@ class LoggerManager:
             message: Message to log
             level: TRACE, INFO, WARN, ERROR or FATAL. Inferred from the message if omitted.
         """
-        message = str(message)
-        resolved = normalize_level(level) or infer_level(message)
-        print(f"[{resolved}] {message}")
+        original = str(message)
+        stored = mask_phi(original)
+        resolved = normalize_level(level) or infer_level(original)
+        print(f"[{resolved}] {stored}")
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # Write to file if enabled
+        # Write masked text to the local file (VM store)
         if self.log_file:
-            self.log_file.write(f"{timestamp} - {resolved} - {message}\n")
+            self.log_file.write(f"{timestamp} - {resolved} - {stored}\n")
             self.log_file.flush()  # Ensure it's written immediately
         
-        # Add to API queue (non-blocking)
+        # Portal queue keeps the original message
         if self.log_queue_manager and should_send_to_api(resolved):
-            self.log_queue_manager.add_log(timestamp, message, resolved)
+            self.log_queue_manager.add_log(timestamp, original, resolved)
     
     def close(self):
         """Close log file and stop log queue manager."""
@@ -277,7 +328,7 @@ class LogQueueManager:
                 
             except Exception as e:
                 # Don't let errors in worker thread crash the app
-                print(f"[LOG QUEUE ERROR] Error in log queue worker: {str(e)}")
+                _write_queue_error(f"Error in log queue worker: {str(e)}")
                 time.sleep(1)
     
     def _send_batch_to_api(self):
@@ -310,13 +361,13 @@ class LogQueueManager:
                 # Success
                 pass
             else:
-                print(f"[LOG QUEUE ERROR] API log send failed with status {response.status_code}")
+                _write_queue_error(f"API log send failed with status {response.status_code}")
                 
         except requests.exceptions.RequestException as e:
-            # Don't block if API fails - just log to console
-            print(f"[LOG QUEUE ERROR] Failed to send logs to API: {str(e)}")
+            # Don't block if API fails - just log to console / local file
+            _write_queue_error(f"Failed to send logs to API: {str(e)}")
         except Exception as e:
-            print(f"[LOG QUEUE ERROR] Error sending logs to API: {str(e)}")
+            _write_queue_error(f"Error sending logs to API: {str(e)}")
     
     def _send_missed_logs(self):
         """Read log file and send any missed logs on startup"""
@@ -390,7 +441,7 @@ class LogQueueManager:
                 f.write(f"{date_str}:{len(lines)}")
                     
         except Exception as e:
-            print(f"[LOG QUEUE ERROR] Error sending missed logs: {str(e)}")
+            _write_queue_error(f"Error sending missed logs: {str(e)}")
     
     def update_last_sent_line(self, line_number):
         """Update the last sent line number with current date"""
