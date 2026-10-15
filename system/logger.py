@@ -77,6 +77,11 @@ def _last4(value):
     return "****" + value[-4:]
 
 
+def _mask_words(value):
+    """Mask each word, keeping the last 4 characters."""
+    return " ".join(_last4(part) for part in str(value).split())
+
+
 _PHI_PATTERNS = [
     (re.compile(r"([\w.+-]+)@[\w-]+(?:\.[\w-]+)+"), lambda m: _last4(m.group(1))),
     (re.compile(r"\b((?:MRN|SSN|member|policy|insurance|account|acct|claim|patient[ _]?id)"
@@ -91,11 +96,30 @@ _PHI_PATTERNS = [
     (re.compile(r"\b(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:19|20)\d{2}\b"), lambda m: _last4(m.group(0))),
 ]
 
+# Names are masked only in these log phrases, after phone and date values are already hidden.
+_NAME_PATTERNS = [
+    (re.compile(r"(for search: )(\S+)"), lambda m: m.group(1) + _last4(m.group(2))),
+    (re.compile(r"(Typing search text: )(.+)$"), lambda m: m.group(1) + _mask_words(m.group(2))),
+    (re.compile(r"(failed for )(.+?)(, note )"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(failed for )(.+?)( \(attempt)"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(Patient )(.+?)( found using )"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(entered in Artisan for )(.+)$"), lambda m: m.group(1) + _mask_words(m.group(2))),
+    (re.compile(r"(today for )(.+?)( - )"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(Attempt \d+/\d+ for )(.+?)(, note_id=)"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(note_id=\S+ \()(.+?)(; phone )"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(Escalating error for )(.+?)( \(clinic)"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(First Name )(.+?)(?= not found| found)"), lambda m: m.group(1) + _mask_words(m.group(2))),
+    (re.compile(r"(?<!and )(Last Name )(.+?)(?= not found| found)"), lambda m: m.group(1) + _mask_words(m.group(2))),
+    (re.compile(r"(and Last Name )(.+)$"), lambda m: m.group(1) + _mask_words(m.group(2))),
+]
+
 
 def mask_phi(message):
-    """Mask email, labelled IDs, SSN, phone and date patterns, keeping the last 4 characters."""
+    """Mask email, labelled IDs, SSN, phone, date, and patient name, keeping the last 4 characters."""
     text = str(message)
     for pattern, replacement in _PHI_PATTERNS:
+        text = pattern.sub(replacement, text)
+    for pattern, replacement in _NAME_PATTERNS:
         text = pattern.sub(replacement, text)
     return text
 

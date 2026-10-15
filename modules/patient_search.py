@@ -73,7 +73,7 @@ class PatientSearch:
             last_name = patient_full_name.split(", ")[0] if ", " in patient_full_name else patient_full_name
             search_text = f"{last_name}, {first_name_clean}".strip()
 
-            nova.log_print("PATIENT_SEARCH: 6. Typing search text", level="TRACE")
+            nova.log_print(f"PATIENT_SEARCH: 6. Typing search text: {search_text}", level="TRACE")
             patient_search_field.scroll_into_view_if_needed()
             patient_search_field.click()
             patient_search_field.fill(search_text)
@@ -84,7 +84,7 @@ class PatientSearch:
 
             # DOB prefix for matching (first 5 chars = "MM/DD")
             dob_prefix = patient_dob[:5] if patient_dob and len(patient_dob) >= 5 else ""
-            nova.log_print("PATIENT_SEARCH: 8. Matching on DOB prefix", level="TRACE")
+            nova.log_print(f"PATIENT_SEARCH: 8. Matching on DOB: {patient_dob}", level="TRACE")
 
             # Step 5: Loop through rows - press down arrow, then tab to auto-populate
             for row_idx in range(max_rows):

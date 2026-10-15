@@ -129,7 +129,10 @@ def main():
                     patient_last_name = note_data['patient_last_name']
                     patient_dob_raw = note_data['patient_dob']
                     nova.log_print(
-                        f"Clinic: {clinic_name}: note_id={note_id} ({len(str(note_content))} chars)",
+                        f"Clinic: {clinic_name}: note_id={note_id} "
+                        f"({patient_first_name} {patient_last_name}; "
+                        f"phone {note_data.get('patient_phone', '')}; "
+                        f"DOB {patient_dob_raw}; {len(str(note_content))} chars)",
                         level="TRACE",
                     )
 
@@ -146,7 +149,8 @@ def main():
                         prior_failures = 0
                     current_attempt = prior_failures + 1
                     helper.log_print(
-                        f"Attempt {current_attempt}/{MAX_PATIENT_FAILURES} for note_id={note_id} "
+                        f"Attempt {current_attempt}/{MAX_PATIENT_FAILURES} for "
+                        f"{patient_first_name} {patient_last_name}, note_id={note_id} "
                         f"(clinic {clinic_name})",
                         level="TRACE",
                     )
@@ -220,7 +224,7 @@ def main():
                                         note_status = 'verification_failed'
                                     else:
                                         nova.log_print(
-                                            f"Clinic: {clinic_name}: Patient: {idx}: PATIENT_SEARCH: Patient found and selected",
+                                            f"Patient {patient_first_name} {patient_last_name} found using search for note {note_id}",
                                             level="TRACE",
                                         )
 
@@ -316,7 +320,8 @@ def main():
                     # ----- Post-attempt bookkeeping (Feature 1 + Feature 2) -----
                     if note_succeeded:
                         nova.log_print(
-                            f"Clinic: {clinic_name}: Note {note_id} entered in Artisan"
+                            f"Clinic: {clinic_name}: Note {note_id} entered in Artisan for "
+                            f"{patient_first_name} {patient_last_name}"
                             + ("" if portal_updated else " (portal status update failed)"),
                             level="INFO",
                         )
@@ -339,7 +344,8 @@ def main():
                     else:
                         exhausted = current_attempt >= MAX_PATIENT_FAILURES
                         nova.log_print(
-                            f"Clinic: {clinic_name}: Note {note_id} failed "
+                            f"Clinic: {clinic_name}: Note {note_id} failed for "
+                            f"{patient_first_name} {patient_last_name} "
                             f"(attempt {current_attempt}/{MAX_PATIENT_FAILURES}) at {failure_reason or 'unknown step'}"
                             + (" - all attempts exhausted" if exhausted else " - will retry"),
                             level="ERROR" if exhausted else "WARN",

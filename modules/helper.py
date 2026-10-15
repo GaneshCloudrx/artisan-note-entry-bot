@@ -236,8 +236,11 @@ def filter_notes_by_report(notes_dataframe, patient_report, content_keys, update
         if content_key in content_keys:
             note_id = note_dict.get("note_id", "")
             nova.log_print(
-                "REPORT: Duplicate content detected for note_id={nid}; marking complete via API.".format(
+                "Note {nid}: same content already entered successfully today for "
+                "{first} {last} - calling update API directly".format(
                     nid=note_id,
+                    first=note_dict.get("patient_first_name", ""),
+                    last=note_dict.get("patient_last_name", ""),
                 ),
                 level="WARN",
             )
