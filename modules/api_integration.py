@@ -36,20 +36,19 @@ def get_clinic_details():
     }
     
     try:
-        nova.log_print(f"Fetching clinic details from: {url}")
+        nova.log_print(f"Fetching clinic details from: {url}", level="TRACE")
         response = requests.post(url, headers=headers, data={}, files={})
         response.raise_for_status()
         
         result = response.json()
-        nova.log_print(f"Successfully retrieved clinic details")
+        nova.log_print(f"Successfully retrieved clinic details", level="TRACE")
         return result
         
     except requests.exceptions.RequestException as e:
-        nova.log_print(f"Error fetching clinic details: {str(e)}")
+        nova.log_print(f"Error fetching clinic details: {str(e)}", level="ERROR")
         return None
     except json.JSONDecodeError as e:
-        nova.log_print(f"Error parsing clinic details response: {str(e)}")
-        nova.log_print(f"Raw response: {response.text}")
+        nova.log_print(f"Error parsing clinic details response: {str(e)}. Raw response: {response.text}", level="ERROR")
         return None
 
 def get_login_token(api_base_url, admin_email, admin_password):
@@ -87,17 +86,17 @@ def get_login_token(api_base_url, admin_email, admin_password):
             }
         else:
             # Log failed login response
-            nova.log_print(f"Login failed. Response: {json.dumps(result, indent=2)}")
+            nova.log_print(f"Portal admin login failed. Response: {json.dumps(result, indent=2)}", level="ERROR")
             return False, {}
             
     except requests.exceptions.RequestException as e:
-        nova.log_print(f"Login request failed: {str(e)}")
+        nova.log_print(f"Portal admin login request failed: {str(e)}", level="ERROR")
         return False, {}
     except json.JSONDecodeError as e:
-        nova.log_print(f"Failed to parse login response: {str(e)}")
+        nova.log_print(f"Failed to parse portal admin login response: {str(e)}", level="ERROR")
         return False, {}
     except Exception as e:
-        nova.log_print(f"Login error: {str(e)}")
+        nova.log_print(f"Portal admin login error: {str(e)}", level="ERROR")
         return False, {}
 
 def get_emr_notes(url, login_data):
@@ -123,8 +122,8 @@ def get_emr_notes(url, login_data):
         try:
             result = response.json()
         except json.JSONDecodeError as e:
-            nova.log_print(f"Failed to parse get notes response: {str(e)}")
-            nova.log_print(f"Response text: {response.text[:500]}")  # Log first 500 chars of response
+            # Log first 500 chars of response
+            nova.log_print(f"Failed to parse get notes response: {str(e)}. Response text: {response.text[:500]}", level="ERROR")
             return False, {}
         
         # Check if request was successful
@@ -132,14 +131,14 @@ def get_emr_notes(url, login_data):
             return True, result
         else:
             # Log failed response
-            nova.log_print(f"Get notes failed. Response: {json.dumps(result, indent=2)}")
+            nova.log_print(f"Get notes failed. Response: {json.dumps(result, indent=2)}", level="ERROR")
             return False, {}
             
     except requests.exceptions.RequestException as e:
-        nova.log_print(f"Get notes request failed: {str(e)}")
+        nova.log_print(f"Get notes request failed: {str(e)}", level="ERROR")
         return False, {}
     except Exception as e:
-        nova.log_print(f"Get notes error: {str(e)}")
+        nova.log_print(f"Get notes error: {str(e)}", level="ERROR")
         return False, {}
 
 def update_note_status(login_data, note_id):
@@ -179,27 +178,26 @@ def update_note_status(login_data, note_id):
         try:
             result = response.json()
         except json.JSONDecodeError as e:
-            nova.log_print(f"Failed to parse update note response: {str(e)}")
-            nova.log_print(f"Response text: {response.text[:500]}")
+            nova.log_print(f"Note {note_id}: failed to parse update note response: {str(e)}. Response text: {response.text[:500]}", level="ERROR")
             return False, {}
         
         # Check if response code is 401 (token expired/invalid)
         if result.get("code") == 401:
-            nova.log_print("Update note failed: Token expired or invalid (code: 401)")
+            nova.log_print(f"Note {note_id}: update note failed: Token expired or invalid (code: 401)", level="ERROR")
             return False, {"needs_token_refresh": True}
         
         # Check if request was successful
         if result.get("status") == "Success":
             return True, result
         else:
-            nova.log_print(f"Update note failed. Response: {json.dumps(result, indent=2)}")
+            nova.log_print(f"Note {note_id}: update note failed. Response: {json.dumps(result, indent=2)}", level="ERROR")
             return False, {}
             
     except requests.exceptions.RequestException as e:
-        nova.log_print(f"Update note request failed: {str(e)}")
+        nova.log_print(f"Note {note_id}: update note request failed: {str(e)}", level="ERROR")
         return False, {}
     except Exception as e:
-        nova.log_print(f"Update note error: {str(e)}")
+        nova.log_print(f"Note {note_id}: update note error: {str(e)}", level="ERROR")
         return False, {}
 
 def log_error_to_portal(patient_name, patient_dob, clinic_name, emr_system,
@@ -246,9 +244,10 @@ def log_error_to_portal(patient_name, patient_dob, clinic_name, emr_system,
 
     try:
         nova.log_print(
-            "ERROR_PORTAL: Escalating error for patient '{name}' (clinic={clinic}, emr={emr})".format(
+            "ERROR_PORTAL: Escalating error for {name} (clinic={clinic}, emr={emr})".format(
                 name=patient_name, clinic=clinic_name, emr=emr_system
-            )
+            ),
+            level="TRACE",
         )
         response = requests.post(
             config.ERROR_API_ENDPOINT,
@@ -257,20 +256,24 @@ def log_error_to_portal(patient_name, patient_dob, clinic_name, emr_system,
             timeout=config.API_TIMEOUT,
         )
         if response.status_code == 200:
-            nova.log_print("ERROR_PORTAL: Error logged successfully (HTTP 200).")
+            nova.log_print(
+                "ERROR_PORTAL: Failure reported to the error portal (clinic={clinic})".format(clinic=clinic_name),
+                level="INFO",
+            )
             return True
 
         nova.log_print(
             "ERROR_PORTAL: Failed with HTTP {code}. Body: {body}".format(
                 code=response.status_code, body=response.text[:300]
-            )
+            ),
+            level="ERROR",
         )
         return False
     except requests.exceptions.RequestException as exc:
-        nova.log_print("ERROR_PORTAL: Request failed: {err}".format(err=exc))
+        nova.log_print("ERROR_PORTAL: Request failed: {err}".format(err=exc), level="ERROR")
         return False
     except Exception as exc:
-        nova.log_print("ERROR_PORTAL: Unexpected error: {err}".format(err=exc))
+        nova.log_print("ERROR_PORTAL: Unexpected error: {err}".format(err=exc), level="ERROR")
         return False
 
 

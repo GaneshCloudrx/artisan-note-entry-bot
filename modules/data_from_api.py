@@ -24,12 +24,12 @@ def data_from_api():
     """
     try:
         # Step 1: Fetch clinic details from API
-        nova.log_print("API DATA: 1. Fetching clinic details")
+        nova.log_print("API DATA: 1. Fetching clinic details", level="TRACE")
         clinic_details = get_clinic_details()
         
         if clinic_details:
             clinic_data = clinic_details['data']
-            nova.log_print(f"API DATA: 2. Clinic data fetched successfully with {len(clinic_data)} clinics")
+            nova.log_print(f"API DATA: 2. Clinic data fetched successfully with {len(clinic_data)} clinics", level="TRACE")
             
             # Step 2: Create clinics DataFrame and filter by machine name
             clinics = pd.DataFrame(
@@ -41,21 +41,21 @@ def data_from_api():
                 ]
             )
             clinics = clinics[clinics['note_bot_machine'] == MACHINE_NAME].reset_index(drop=True)
-            nova.log_print(f"API DATA: 3. Filtered clinics for machine {MACHINE_NAME} with {len(clinics)} clinics")
+            nova.log_print(f"API DATA: 3. Filtered clinics for machine {MACHINE_NAME} with {len(clinics)} clinics", level="TRACE")
             
             if len(clinics) > 0:
                 # Step 3: Get authentication token for admin
-                nova.log_print("API DATA: 4. Fetching token for admin")
+                nova.log_print("API DATA: 4. Fetching token for admin", level="TRACE")
                 status, token = get_login_token(API_BASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD)
                 
                 if status:
-                    nova.log_print("API DATA: 5. Token fetched successfully")
+                    nova.log_print("API DATA: 5. Token fetched successfully", level="TRACE")
                     
                     # Step 4: Fetch EMR notes using the token
                     status, note_details = get_emr_notes(API_BASE_URL, token)
                     
                     if status:
-                        nova.log_print(f"API DATA: 6. Notes fetched successfully with {len(note_details['data'])} notes")
+                        nova.log_print(f"API DATA: 6. Notes fetched successfully with {len(note_details['data'])} notes", level="TRACE")
                         
                         # Step 5: Create notes DataFrame and filter by clinic names
                         notes = pd.DataFrame(
@@ -69,24 +69,21 @@ def data_from_api():
                             ]
                         )
                         notes = notes[notes['clinic_name'].isin(clinics['Clinic_Name'])].reset_index(drop=True)
-                        nova.log_print(f"API DATA: 7. Notes filtered for clinics with {len(notes)} notes")
+                        nova.log_print(f"API DATA: 7. Notes filtered for clinics with {len(notes)} notes", level="TRACE")
                         
                         return clinics, notes
                     else:
-                        nova.log_print("API DATA: 6. Failed to fetch notes")
                         return clinics, None
                 else:
-                    nova.log_print("API DATA: 5. Failed to fetch token")
                     return clinics, None
             else:
-                nova.log_print(f"API DATA: 3. No clinics found for machine {MACHINE_NAME}")
+                nova.log_print(f"API DATA: 3. No clinics found for machine {MACHINE_NAME}", level="WARN")
                 return None, None
         else:
-            nova.log_print("API DATA: 1. Failed to fetch clinic details")
             return None, None
             
     except Exception as e:
-        nova.log_print(f"API DATA: #. Error in data_from_api: {str(e)}")
+        nova.log_print(f"API DATA: #. Error in data_from_api: {str(e)}", level="ERROR")
         return None, None
 
 
@@ -99,17 +96,17 @@ def note_data_from_api():
     """
     try:
         # Step 1: Get authentication token for admin
-        nova.log_print("API DATA: 1. Fetching token for admin")
+        nova.log_print("API DATA: 1. Fetching token for admin", level="TRACE")
         status, token = get_login_token(API_BASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD)
         
         if status:
-            nova.log_print("API DATA: 2. Token fetched successfully")
+            nova.log_print("API DATA: 2. Token fetched successfully", level="TRACE")
             
             # Step 2: Fetch EMR notes using the token
             status, note_details = get_emr_notes(API_BASE_URL, token)
             
             if status:
-                nova.log_print(f"API DATA: 3. Notes fetched successfully with {len(note_details['data'])} notes")
+                nova.log_print(f"API DATA: 3. Notes fetched successfully with {len(note_details['data'])} notes", level="TRACE")
                 
                 # Step 3: Create notes DataFrame
                 notes = pd.DataFrame(
@@ -122,18 +119,15 @@ def note_data_from_api():
                         'created_formatted', 'prescriber_name'
                     ]
                 )
-                nova.log_print(f"API DATA: 4. Notes filtered for clinics with {len(notes)} notes")
                 
                 return notes
             else:
-                nova.log_print("API DATA: 3. Failed to fetch notes")
                 return None
         else:
-            nova.log_print("API DATA: 2. Failed to fetch token")
             return None
             
     except Exception as e:
-        nova.log_print(f"API DATA: #. Error in note_data_from_api: {str(e)}")
+        nova.log_print(f"API DATA: #. Error in note_data_from_api: {str(e)}", level="ERROR")
         return None
 
 
@@ -143,22 +137,25 @@ def update_api(note_id):
     
     Args:
         note_id: ID of the note to update
+
+    Returns:
+        bool: True if the portal accepted the update. Failures are logged by
+        api_integration, where the response is known.
     """
     # Step 1: Get authentication token
     status, token = get_login_token(API_BASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD)
     
     if status:
-        nova.log_print(f"API UPDATE: 1. Token fetched successfully")
+        nova.log_print(f"API UPDATE: 1. Token fetched successfully", level="TRACE")
         
         # Step 2: Update note status
         status, result = update_note_status(token, note_id)
         
         if status:
-            nova.log_print(f"API UPDATE: 2. Note status updated successfully")
-        else:
-            nova.log_print(f"API UPDATE: 2. Failed to update note status")
+            nova.log_print(f"API UPDATE: 2. Note {note_id} status updated successfully", level="TRACE")
+            return True
+    return False
 
 
 if __name__ == "__main__":
     data_from_api()
-

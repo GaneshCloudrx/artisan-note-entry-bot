@@ -76,29 +76,29 @@ def _close_log_queue_manager():
         logger_manager.close()
 
 
-def log_print(message):
+def log_print(message, level=None):
     """
     Print to console and write to log file, and add to API queue.
     
     Args:
         message: Message to log
+        level: TRACE, INFO, WARN, ERROR or FATAL (see system/logger.py)
     """
     global logger_manager
     if logger_manager:
-        logger_manager.log_print(message)
+        logger_manager.log_print(message, level=level)
     else:
         # Fallback to console if logger not initialized
-        print(message)
+        from system.logger import mask_phi
+        print(f"[{level or 'TRACE'}] {mask_phi(message)}")
 
 
-def _init_heartbeat():
+def init_heartbeat():
     """
-    Initialize and start the heartbeat manager.
-    Internal function - use initialize() instead.
-    Reads configuration directly from config.py.
+    Create the heartbeat manager. Calls are made explicitly via send_heartbeat().
     
     Returns:
-        HeartbeatManager instance (already started) or None if disabled
+        HeartbeatManager instance or None if disabled
     """
     global heartbeat_manager
     
@@ -111,11 +111,28 @@ def _init_heartbeat():
         auth_header=config.HEARTBEAT_AUTH_HEADER,
         server_name=config.HEARTBEAT_SERVER_NAME,
         bot_name=config.HEARTBEAT_BOT_NAME,
-        interval=config.HEARTBEAT_INTERVAL,
         timeout=config.HEARTBEAT_TIMEOUT
     )
-    heartbeat_manager.start()
+    log_print("Heartbeat manager ready", level="TRACE")
     return heartbeat_manager
+
+
+def send_heartbeat():
+    """Send one heartbeat and refresh pause/resume state from the response."""
+    global heartbeat_manager
+    if heartbeat_manager is not None:
+        heartbeat_manager.send()
+
+
+def stop_heartbeat():
+    """Drop the heartbeat manager."""
+    global heartbeat_manager
+    heartbeat_manager = None
+
+
+def _init_heartbeat():
+    """Internal alias - use initialize() / init_heartbeat()."""
+    return init_heartbeat()
 
 
 def _start_recording(output_dir=None, fps=None, quality=None):
@@ -153,11 +170,9 @@ def _start_recording(output_dir=None, fps=None, quality=None):
             segment_duration_minutes=segment_duration
         )
         screen_recorder.start_recording()
-        log_print("Screen recording started for entire session")
         return True
     except Exception as e:
-        log_print(f"WARNING: Failed to start screen recording: {str(e)}")
-        log_print("Continuing without screen recording...")
+        log_print(f"Failed to start screen recording: {str(e)} - continuing without recording", level="ERROR")
         screen_recorder = None
         return False
 
@@ -177,11 +192,9 @@ def _stop_recording():
     
     try:
         recording_file = screen_recorder.stop_recording()
-        if recording_file:
-            log_print(f"Screen recording saved: {recording_file}")
         return recording_file
     except Exception as e:
-        log_print(f"Error stopping screen recording: {str(e)}")
+        log_print(f"Error stopping screen recording: {str(e)}", level="ERROR")
         return None
     finally:
         screen_recorder = None
@@ -200,10 +213,10 @@ def _wait_for_activation(heartbeat_manager):
         return
     
     import time
-    log_print("Bot paused by server. Waiting for activation...")
     while not heartbeat_manager.is_bot_active():
-        time.sleep(5)  # Check every 5 seconds
-    log_print("Bot activated by server. Resuming automation...")
+        log_print("Bot paused by server. Waiting for activation...", level="TRACE")
+        time.sleep(10)
+        heartbeat_manager.send()
 
 
 def _check_and_wait_if_paused_with_manager(heartbeat_manager):
@@ -256,7 +269,7 @@ def initialize():
     if config.RECORDING_ENABLED:
         _start_recording()
     
-    log_print("=== Bot initialized ===")
+    log_print("Bot components initialized", level="TRACE")
     
     return {
         'logger_manager': logger_manager,
@@ -272,21 +285,19 @@ def stop():
     """
     global logger_manager, heartbeat_manager, screen_recorder
     
-    log_print("Cleaning up...")
+    log_print("Cleaning up...", level="TRACE")
     
     # Stop screen recording (if it was started)
     if screen_recorder:
         _stop_recording()
     
-    # Stop heartbeat manager (if it was started)
-    if heartbeat_manager:
-        heartbeat_manager.stop()
-        heartbeat_manager = None
+    # Drop the heartbeat manager (if it was created)
+    stop_heartbeat()
     
     # Close logger manager (handles both file and API logging cleanup)
     if logger_manager:
         logger_manager.close()
         logger_manager = None
     
-    log_print("=== Bot stopped ===")
+    log_print("Bot components stopped", level="TRACE")
 

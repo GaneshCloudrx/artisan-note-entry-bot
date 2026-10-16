@@ -1,17 +1,180 @@
 """
 Logger module - handles file logging and async API logging
 """
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import time
 import queue
 import threading
 import requests
 import os
+import re
+import config
 from config import (
     API_BASE_URL, API_AUTH_HEADER, API_SERVER_NAME, API_BOT_NAME, 
     API_TIMEOUT, API_LOG_ENDPOINT, API_LOG_BATCH_SIZE,
     API_LOG_BATCH_INTERVAL, API_LOG_ENABLED, LOG_ENABLED, LOG_QUEUE_ENABLED
 )
+
+
+# === Log-level system ===
+# Pick the level from the event, using the same level for that event in every file.
+# Pass the level to log_print; infer_level() below is only the fallback for a call
+# that forgot one. Only INFO and above go to the portal (config.API_LOG_MIN_LEVEL).
+#
+# TRACE  Step detail that is not an outcome: element lookups, keystrokes,
+#        per-item progress, per-item loop lines, idle "no data" polls, fetch
+#        counts, startup details. Written to the local log only.
+# INFO   A real outcome worth seeing on the portal: bot started/stopped, clinic
+#        or batch processing started, session summary, a verified result.
+# WARN   The bot continues: a retry, a recovered exception, a business skip
+#        (missing field, already processed), a popup/wizard appearing.
+# ERROR  The record, step, clinic or cycle failed: attempts exhausted, app failed
+#        to open/restart, login/config failed with no retry left, a portal call
+#        failed with no retry, recording failed. Log the stack trace once, here
+#        only.
+# FATAL  Unrecoverable, or portal data may have been lost.
+LOG_LEVELS = {"TRACE": 0, "INFO": 1, "WARN": 2, "ERROR": 3, "FATAL": 4}
+_LEVEL_ALIASES = {"WARNING": "WARN", "CRITICAL": "FATAL", "DEBUG": "TRACE", "VERBOSE": "TRACE"}
+API_LOG_MIN_LEVEL = getattr(config, "API_LOG_MIN_LEVEL", "INFO")
+
+_FATAL_KW = ["fatal", "unrecoverable", "crash"]
+_ERROR_KW = ["error", "exception", "traceback", "failed"]
+_WARN_KW = ["warning", "retry", "retrying", "skipping", "not found", "mismatch"]
+_INFO_KW = ["success", "started", "stopped", "summary"]
+
+
+def normalize_level(level):
+    """Canonical level name or None if invalid."""
+    if level is None:
+        return None
+    up = str(level).upper().strip()
+    up = _LEVEL_ALIASES.get(up, up)
+    return up if up in LOG_LEVELS else None
+
+
+def infer_level(message):
+    """Keyword classifier - fallback level for a call that did not pass one."""
+    low = str(message).lower()
+    for level, keywords in (("FATAL", _FATAL_KW), ("ERROR", _ERROR_KW),
+                            ("WARN", _WARN_KW), ("INFO", _INFO_KW)):
+        if any(kw in low for kw in keywords):
+            return level
+    return "TRACE"
+
+
+def should_send_to_api(level):
+    return LOG_LEVELS.get(level, 0) >= LOG_LEVELS.get(normalize_level(API_LOG_MIN_LEVEL) or "INFO", 1)
+
+
+# === PHI masking (safety net for what is stored on the VM) ===
+# Applied to the local log file and the console. The portal upload keeps the
+# original message. \b / lookbehinds keep digits inside file names intact.
+def _last4(value):
+    """Keep the last 4 characters and hide the rest."""
+    value = str(value)
+    if len(value) <= 4:
+        return "****"
+    return "****" + value[-4:]
+
+
+def _mask_words(value):
+    """Mask each word, keeping the last 4 characters."""
+    return " ".join(_last4(part) for part in str(value).split())
+
+
+_PHI_PATTERNS = [
+    (re.compile(r"([\w.+-]+)@[\w-]+(?:\.[\w-]+)+"), lambda m: _last4(m.group(1))),
+    (re.compile(r"\b((?:MRN|SSN|member|policy|insurance|account|acct|claim|patient[ _]?id)"
+                r"\s*(?:id|no|number|#)?\s*[:#=]?\s*)(?=[A-Za-z0-9-]*\d)([A-Za-z0-9-]{4,})",
+                re.IGNORECASE),
+     lambda m: m.group(1) + _last4(m.group(2))),
+    (re.compile(r"\b\d{3}-\d{2}-(\d{4})\b"), lambda m: "****" + m.group(1)),
+    (re.compile(r"(?<![\w*])(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?(\d{4})\b"),
+     lambda m: "****" + m.group(1)),
+    (re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"), lambda m: _last4(m.group(0))),
+    (re.compile(r"\b(?:19|20)\d{2}[/-]\d{1,2}[/-]\d{1,2}\b"), lambda m: _last4(m.group(0))),
+    (re.compile(r"\b(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:19|20)\d{2}\b"), lambda m: _last4(m.group(0))),
+]
+
+# Names are masked only in these log phrases, after phone and date values are already hidden.
+_NAME_PATTERNS = [
+    (re.compile(r"(for search: )(\S+)"), lambda m: m.group(1) + _last4(m.group(2))),
+    (re.compile(r"(Typing search text: )(.+)$"), lambda m: m.group(1) + _mask_words(m.group(2))),
+    (re.compile(r"(failed for )(.+?)(, note )"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(failed for )(.+?)( \(attempt)"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(Patient )(.+?)( found using )"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(entered in Artisan for )(.+)$"), lambda m: m.group(1) + _mask_words(m.group(2))),
+    (re.compile(r"(today for )(.+?)( - )"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(Attempt \d+/\d+ for )(.+?)(, note_id=)"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(note_id=\S+ \()(.+?)(; phone )"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(Escalating error for )(.+?)( \(clinic)"), lambda m: m.group(1) + _mask_words(m.group(2)) + m.group(3)),
+    (re.compile(r"(First Name )(.+?)(?= not found| found)"), lambda m: m.group(1) + _mask_words(m.group(2))),
+    (re.compile(r"(?<!and )(Last Name )(.+?)(?= not found| found)"), lambda m: m.group(1) + _mask_words(m.group(2))),
+    (re.compile(r"(and Last Name )(.+)$"), lambda m: m.group(1) + _mask_words(m.group(2))),
+]
+
+
+def mask_phi(message):
+    """Mask email, labelled IDs, SSN, phone, date, and patient name, keeping the last 4 characters."""
+    text = str(message)
+    for pattern, replacement in _PHI_PATTERNS:
+        text = pattern.sub(replacement, text)
+    for pattern, replacement in _NAME_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _portal_timestamp(local_text):
+    """VM-local log time as US Central. Applied only to the portal payload."""
+    fmt = '%Y-%m-%d %H:%M:%S'
+    try:
+        utc = datetime.strptime(local_text, fmt).astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return local_text
+    year = utc.year
+    # 2:00 AM Central on the second Sunday of March, through 2:00 AM Central
+    # on the first Sunday of November.
+    start = datetime(year, 3, 1, tzinfo=timezone.utc)
+    start = start.replace(day=8 + (6 - start.weekday()) % 7, hour=8)
+    end = datetime(year, 11, 1, tzinfo=timezone.utc)
+    end = end.replace(day=1 + (6 - end.weekday()) % 7, hour=7)
+    offset = timedelta(hours=-5 if start <= utc < end else -6)
+    return (utc + offset).strftime(fmt)
+
+
+def _write_queue_error(error_message):
+    """Write a masked [LOG QUEUE ERROR] line to the console and the daily log file."""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    stored = mask_phi(f"[LOG QUEUE ERROR] {error_message}")
+    print(f"[ERROR] {stored}")
+    try:
+        log_dir = "logs"
+        os.makedirs(log_dir, exist_ok=True)
+        path = os.path.join(log_dir, f"log_{datetime.now().strftime('%Y-%m-%d')}.txt")
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{timestamp} - ERROR - {stored}\n")
+    except Exception:
+        pass
+
+
+def _parse_log_line(line):
+    """Split a log file line into (timestamp, level, message), or None if it is not one.
+
+    Current format is "timestamp - LEVEL - message"; lines written before levels
+    existed are "timestamp - message" and get an inferred level.
+    """
+    parts = line.rstrip("\n").split(" - ", 2)
+    if len(parts) < 2:
+        return None
+    timestamp = parts[0].strip()
+    try:
+        datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return None
+    if len(parts) == 3 and parts[1] in LOG_LEVELS:
+        return timestamp, parts[1], parts[2].strip()
+    message = line.rstrip("\n").split(" - ", 1)[1].strip()
+    return timestamp, infer_level(message), message
 
 
 class LoggerManager:
@@ -61,24 +224,28 @@ class LoggerManager:
         self.log_queue_manager = LogQueueManager()
         self.log_queue_manager.start()
     
-    def log_print(self, message):
+    def log_print(self, message, level=None):
         """
         Print to console and write to log file, and add to API queue.
         
         Args:
             message: Message to log
+            level: TRACE, INFO, WARN, ERROR or FATAL. Inferred from the message if omitted.
         """
-        print(message)
+        original = str(message)
+        stored = mask_phi(original)
+        resolved = normalize_level(level) or infer_level(original)
+        print(f"[{resolved}] {stored}")
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # Write to file if enabled
+        # Write masked text to the local file (VM store)
         if self.log_file:
-            self.log_file.write(f"{timestamp} - {message}\n")
+            self.log_file.write(f"{timestamp} - {resolved} - {stored}\n")
             self.log_file.flush()  # Ensure it's written immediately
         
-        # Add to API queue (non-blocking)
-        if self.log_queue_manager:
-            self.log_queue_manager.add_log(timestamp, message)
+        # Portal queue keeps the original message
+        if self.log_queue_manager and should_send_to_api(resolved):
+            self.log_queue_manager.add_log(timestamp, original, resolved)
     
     def close(self):
         """Close log file and stop log queue manager."""
@@ -152,7 +319,7 @@ class LogQueueManager:
         except:
             pass
     
-    def add_log(self, timestamp, message):
+    def add_log(self, timestamp, message, level="INFO"):
         """Add a log message to the queue (non-blocking)"""
         if not LOG_QUEUE_ENABLED:
             return
@@ -160,7 +327,8 @@ class LogQueueManager:
         try:
             self.queue.put_nowait({
                 'timestamp': timestamp,
-                'message': message
+                'message': message,
+                'level': level
             })
         except queue.Full:
             # Queue is full, skip this log (don't block)
@@ -202,7 +370,7 @@ class LogQueueManager:
                 
             except Exception as e:
                 # Don't let errors in worker thread crash the app
-                print(f"Error in log queue worker: {str(e)}")
+                _write_queue_error(f"Error in log queue worker: {str(e)}")
                 time.sleep(1)
     
     def _send_batch_to_api(self):
@@ -216,7 +384,8 @@ class LogQueueManager:
                 "server_name": API_SERVER_NAME,
                 "logs": [
                     {
-                        "timestamp": log['timestamp'],
+                        "timestamp": _portal_timestamp(log['timestamp']),
+                        "level": log.get('level', 'INFO'),
                         "message": log['message']
                     }
                     for log in self.batch
@@ -234,13 +403,13 @@ class LogQueueManager:
                 # Success
                 pass
             else:
-                print(f"API log send failed with status {response.status_code}")
+                _write_queue_error(f"API log send failed with status {response.status_code}")
                 
         except requests.exceptions.RequestException as e:
-            # Don't block if API fails - just log to console
-            print(f"Failed to send logs to API: {str(e)}")
+            # Don't block if API fails - just log to console / local file
+            _write_queue_error(f"Failed to send logs to API: {str(e)}")
         except Exception as e:
-            print(f"Error sending logs to API: {str(e)}")
+            _write_queue_error(f"Error sending logs to API: {str(e)}")
     
     def _send_missed_logs(self):
         """Read log file and send any missed logs on startup"""
@@ -285,18 +454,20 @@ class LogQueueManager:
             if not new_lines:
                 return
             
-            # Parse and send new logs
+            # Parse and send new logs (only levels the portal accepts)
             batch = []
             for line in new_lines:
-                # Parse log line: "2025-11-26 15:04:40 - message"
-                parts = line.split(' - ', 1)
-                if len(parts) == 2:
-                    timestamp = parts[0].strip()
-                    message = parts[1].strip()
-                    batch.append({
-                        'timestamp': timestamp,
-                        'message': message
-                    })
+                parsed = _parse_log_line(line)
+                if parsed is None:
+                    continue
+                timestamp, level, message = parsed
+                if not should_send_to_api(level):
+                    continue
+                batch.append({
+                    'timestamp': timestamp,
+                    'level': level,
+                    'message': message
+                })
             
             if batch:
                 # Send in batches
@@ -307,12 +478,12 @@ class LogQueueManager:
                     self.batch = []
                     time.sleep(0.1)  # Small delay between batches
                 
-                # Update last sent line with date:line_number format
-                with open(self.last_sent_line_file, 'w') as f:
-                    f.write(f"{date_str}:{len(lines)}")
+            # Update last sent line with date:line_number format
+            with open(self.last_sent_line_file, 'w') as f:
+                f.write(f"{date_str}:{len(lines)}")
                     
         except Exception as e:
-            print(f"Error sending missed logs: {str(e)}")
+            _write_queue_error(f"Error sending missed logs: {str(e)}")
     
     def update_last_sent_line(self, line_number):
         """Update the last sent line number with current date"""
@@ -322,4 +493,3 @@ class LogQueueManager:
                 f.write(f"{date_str}:{line_number}")
         except:
             pass
-
